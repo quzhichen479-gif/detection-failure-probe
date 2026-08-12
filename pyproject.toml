@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "detection-failure-probe"
+version = "0.1.0a0"
+description = "Local-first dataset auditing and failure analysis for object detection."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "quzhichen479-gif"}]
+keywords = ["object-detection", "yolo", "dataset-audit", "failure-analysis"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "Pillow>=10.0",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.9",
+]
+
+[project.scripts]
+failure-probe = "failure_probe.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/quzhichen479-gif/detection-failure-probe"
+Issues = "https://github.com/quzhichen479-gif/detection-failure-probe/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/failure_probe/report.py" = ["E501"]  # Embedded HTML template.
+"src/failure_probe/review.py" = ["E501"]  # Embedded zero-build HTML/JS application.

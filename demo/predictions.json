@@ -1,0 +1,28 @@
+{
+  "bbox_format": "xywh",
+  "normalized": false,
+  "images": [
+    {
+      "image": "images/scene_01.png",
+      "predictions": [
+        {"class_id": 0, "bbox": [56.0, 72.0, 80.0, 96.0], "confidence": 0.94},
+        {"class_id": 0, "bbox": [56.0, 72.0, 80.0, 96.0], "confidence": 0.88},
+        {"class_id": 0, "bbox": [56.0, 72.0, 80.0, 96.0], "confidence": 0.71},
+        {"class_id": 0, "bbox": [252.8, 45.6, 6.4, 4.8], "confidence": 0.82}
+      ]
+    },
+    {
+      "image": "images/scene_02.png",
+      "predictions": [
+        {"class_id": 1, "bbox": [82.0, 112.0, 158.0, 7.2], "confidence": 0.62},
+        {"class_id": 0, "bbox": [15.0, 25.0, 38.0, 40.0], "confidence": 0.33}
+      ]
+    },
+    {
+      "image": "images/scene_03.png",
+      "predictions": [
+        {"class_id": 1, "bbox": [200.0, 80.0, 45.0, 50.0], "confidence": 0.19}
+      ]
+    }
+  ]
+}

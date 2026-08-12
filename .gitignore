@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments and tooling
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local analysis outputs and notes
+runs/
+demo/runs/
+
+# Codex workspace scratch/deliverables
+work/
+outputs/
