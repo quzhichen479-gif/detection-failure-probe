@@ -11,6 +11,12 @@ This repository already contains `detection-failure-probe`, whose `src/`, `scrip
 
 This track is also **not a claim that attention is already effective**. Existing project evidence contains many negative or unstable feature-enhancement results. The only recent attention-like engineering control with a small positive matched-test delta was E2+ECA, and that gain was only about +0.00237 mAP50-95 on one seed, which is insufficient as an innovation claim. Therefore these three modules are exploratory candidates and require isolated ablation.
 
+## Baseline rule
+
+The preceding YOLO11n baseline already exists. **Do not retrain or reproduce it.** Reuse its existing checkpoint, metrics, run metadata, and evaluator outputs.
+
+Before any candidate training, read `05_BASELINE_AND_TRAINING_PROTOCOL.md`, recover the exact recipe from the actual baseline artifacts, write `implementation/BASELINE_RECIPE_LOCK.md`, and run the required baseline-vs-candidate configuration diff. Candidate training may change only the module/model structure, run name, and output path. If a comparison-critical baseline parameter cannot be recovered, stop before training instead of guessing.
+
 ## Candidate order
 
 1. **CAA-Lite** — first priority. Long-range axis/context aggregation with low implementation risk.
@@ -33,7 +39,8 @@ For Ultralytics YOLO11, the relevant classification path is the `Detect.cv3` bra
 - `01_CAA_LITE.md` — CAA-Lite equations, reference implementation skeleton, insertion guidance.
 - `02_LSK_LITE.md` — LSK-Lite equations, implementation skeleton, insertion guidance.
 - `03_BRA_LITE.md` — BRA-Lite routing formulation, implementation skeleton, insertion guidance.
-- `04_CODEX_IMPLEMENTATION_PLAN.md` — exact staged engineering task for Codex.
+- `04_CODEX_IMPLEMENTATION_PLAN.md` — staged engineering task for Codex.
+- `05_BASELINE_AND_TRAINING_PROTOCOL.md` — mandatory baseline reuse and matched-training protocol.
 
 ## Source papers / official implementations
 
@@ -46,4 +53,4 @@ For Ultralytics YOLO11, the relevant classification path is the `Detect.cv3` bra
 
 ## Codex reading rule
 
-Codex should start from this README, then read all numbered files in order. It must implement **one candidate at a time**, with independent switches and no simultaneous module stacking. It should not train or use the locked test set unless a later instruction explicitly requests training/evaluation.
+Codex should start from this README, then read all numbered files in order, including `05_BASELINE_AND_TRAINING_PROTOCOL.md`. It must implement **one candidate at a time**, with independent switches and no simultaneous module stacking. The existing baseline must not be retrained. Any candidate training must use the exact preceding-baseline protocol and pass the configuration-diff gate first. The independent test set must not be used for iterative selection or tuning.
