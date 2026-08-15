@@ -27,7 +27,9 @@ Implication: a new attention experiment must preserve the regression path and an
 5. Do not enable a candidate at more than one insertion point in the first screening round.
 6. Do not touch the repository's existing `src/` probe package.
 7. Do not use the independent test set for iterative tuning.
-8. Preserve the frozen baseline recipe except for the module under test.
+8. **The baseline already exists and must not be retrained or replaced.**
+9. Every candidate training run must preserve the exact preceding-baseline recipe except for the documented model/module change, run name, and output path.
+10. Before candidate training, follow `05_BASELINE_AND_TRAINING_PROTOCOL.md` and pass its protocol-diff gate.
 
 ## 4. Why classification-only first
 
@@ -39,7 +41,13 @@ The first round therefore places attention only on `Detect.cv3` (classification 
 - classification feature path changes;
 - if AP75 drops substantially, the cause is less likely to be direct regression-feature corruption and more likely to involve scoring/ranking/assignment interactions.
 
-## 5. Screening metrics
+## 5. Baseline reference and training comparability
+
+The comparison reference is the **already-completed baseline run**, not a freshly retrained baseline. Reuse its saved checkpoint, metrics, training metadata, and evaluator outputs.
+
+Before training any candidate, Codex must recover the baseline recipe from primary run artifacts and write `implementation/BASELINE_RECIPE_LOCK.md`. The candidate launch must then be diffed against that lock. Do not substitute generic Ultralytics defaults for unknown baseline values.
+
+## 6. Screening metrics
 
 Minimum report for every candidate:
 
@@ -60,17 +68,18 @@ Preferred diagnostic additions:
 - matched-object IoU distribution
 - per-scale P3/P4/P5 contribution if available
 
-## 6. Stop / advance rules
+## 7. Stop / advance rules
 
 ### Immediate stop
 
 Stop a candidate if any of the following holds under the frozen validation protocol:
 
-- mAP50-95 decreases by >= 0.005 absolute versus matched baseline;
+- mAP50-95 decreases by >= 0.005 absolute versus the existing baseline reference;
 - mAP75 decreases by >= 0.005 without a compensating and explainable gain in the primary objective;
 - latency or compute cost is disproportionate to any gain;
 - implementation changes the regression branch or unrelated training logic;
-- build/export/runtime behavior is unstable.
+- build/export/runtime behavior is unstable;
+- baseline-vs-candidate protocol diff is not clean.
 
 ### Candidate for second seed / deeper audit
 
@@ -82,12 +91,14 @@ A candidate may advance only if it shows all of:
 - modest complexity overhead;
 - a plausible mechanism visible in diagnostics, not only a lucky scalar metric.
 
-## 7. Experimental order
+## 8. Experimental order
 
 Recommended first-screen order:
 
 1. CAA-Lite @ P3 cls pre-predictor
 2. LSK-Lite @ P3 cls mid-branch
 3. BRA-Lite @ P3 cls mid-branch
+
+Each candidate must first pass engineering validation, then (when training is part of the active task) pass the baseline-recipe protocol gate before training. The baseline itself is never rerun.
 
 Only after those three are separately completed should the second insertion position of the best surviving candidate be tested.
