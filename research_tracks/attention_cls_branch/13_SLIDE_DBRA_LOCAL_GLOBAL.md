@@ -5,6 +5,7 @@
 > Base: DBRA at P3-Cls-Mid  
 > Source: Slide-Transformer, CVPR 2023  
 > Official code: https://github.com/LeapLabTHU/Slide-Transformer
+> Canonical project reference code: `reference_code/round3_companion_modules.py::SlideAttention2d`
 
 ## 1. Why the previous serial idea is revised
 
@@ -16,9 +17,9 @@ cls block-0 -> Slide -> DBRA -> cls block-1
 
 This is no longer the primary design.
 
-Reason: DBRA P3-mid already has positive small-object evidence (`APs +0.0153`, `ARs +0.0075` vs baseline under paper-aligned COCOeval). The main new concern is that `APm/ARm` are lower. If Slide is placed *before* DBRA, it modifies the very input distribution of the mechanism that already works.
+DBRA P3-mid already has positive small-object evidence (`APs +0.0153`, `ARs +0.0075` vs baseline under paper-aligned COCOeval), while `APm/ARm` are lower. Putting Slide before DBRA would modify the input distribution of the mechanism that already works.
 
-A safer and more informative design is:
+The primary design is therefore:
 
 ```text
                        -> DBRA routed-context -----
@@ -26,136 +27,74 @@ U = cls block-0(P3) ---                              +-> residual fusion -> bloc
                        -> Slide local evidence -----
 ```
 
-This preserves DBRA as an explicit branch while asking whether local contiguous evidence contributes complementary information.
+This preserves DBRA as an explicit anchor and asks whether local contiguous evidence is complementary.
 
 ## 2. What Slide Attention actually does
 
-Slide Attention is local self-attention. For every query position it attends only to a `k x k` neighborhood.
+Slide Attention is local self-attention. Each query attends only to a `k x k` neighborhood.
 
-The official implementation forms Q/K/V, then constructs local K/V neighborhoods using depthwise convolutions. One depthwise kernel is initialized as fixed shifts and frozen; another parallel depthwise kernel is learnable. Their outputs are added, which relaxes the rigid neighborhood shifts while keeping ordinary convolution primitives.
+The official Slide-Swin implementation uses:
 
-For each position:
+```text
+qkv projection
+-> reshape to per-head packed q/k/v feature
+-> designed depthwise shift + learnable depthwise shift for K/V
+-> relative local bias
+-> softmax over k^2 local neighbors
+-> weighted local V aggregation
+-> output projection
+```
+
+For each position, conceptually:
 
 \[
 a_{p,j}=\operatorname{softmax}_j\left(\frac{q_p^T k_{p,j}}{\sqrt d}+b_j\right)
 \]
 
-for local neighbors `j in N_k(p)`, then
+for `j` in the local neighborhood, then
 
 \[
-y_p=\sum_{j\in N_k(p)}a_{p,j}v_{p,j}.
+y_p=\sum_j a_{p,j}v_{p,j}.
 \]
 
-The official code commonly uses `ka=3`, i.e. a 3x3 local neighborhood.
+The paper/official repository describes two shift paths during training: one designed/fixed shift kernel and one learnable path, merged by re-parameterization for inference. The released `SlideAttention` commonly uses `ka=3`.
 
-## 3. Project adaptation: dynamic-resolution NCHW Slide
+## 3. Source-fidelity correction made during this design review
 
-The official Slide-Swin code stores a fixed `input_resolution`. That is unnecessary and brittle for YOLO, where inference shapes may vary.
-
-The project implementation should infer `H,W` at runtime and use NCHW 1x1 convolutions for per-pixel QKV/projection. A 1x1 Conv2d is equivalent to applying a shared linear projection to every spatial token.
-
-Clean project implementation skeleton:
+An earlier draft of this document used a conventional:
 
 ```python
-from __future__ import annotations
-
-import math
-import torch
-import torch.nn as nn
-
-
-class SlideAttention2d(nn.Module):
-    """Dynamic-resolution NCHW implementation of Slide-style local attention."""
-
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int = 4,
-        kernel_size: int = 3,
-        qkv_bias: bool = True,
-        proj_bias: bool = True,
-    ):
-        super().__init__()
-        if dim % num_heads != 0:
-            raise ValueError(f"dim={dim} must be divisible by num_heads={num_heads}")
-        if kernel_size % 2 != 1:
-            raise ValueError("kernel_size must be odd")
-
-        self.dim = int(dim)
-        self.num_heads = int(num_heads)
-        self.head_dim = dim // num_heads
-        self.k = int(kernel_size)
-        self.k2 = self.k * self.k
-        self.scale = self.head_dim ** -0.5
-
-        self.qkv = nn.Conv2d(dim, 3 * dim, 1, bias=qkv_bias)
-        self.proj = nn.Conv2d(dim, dim, 1, bias=proj_bias)
-
-        # Official Slide idea: fixed shift extractor + learnable deformation path.
-        self.fixed_shift = nn.Conv2d(
-            self.head_dim,
-            self.k2 * self.head_dim,
-            self.k,
-            padding=self.k // 2,
-            groups=self.head_dim,
-            bias=False,
-        )
-        self.learned_shift = nn.Conv2d(
-            self.head_dim,
-            self.k2 * self.head_dim,
-            self.k,
-            padding=self.k // 2,
-            groups=self.head_dim,
-            bias=True,
-        )
-
-        self.relative_bias = nn.Parameter(
-            torch.zeros(1, self.num_heads, 1, self.k2, 1, 1)
-        )
-        self._init_fixed_shift()
-
-    def _init_fixed_shift(self) -> None:
-        kernel = torch.zeros(self.k2, self.k, self.k)
-        for i in range(self.k2):
-            kernel[i, i // self.k, i % self.k] = 1.0
-
-        # Conv weight layout: [head_dim*k2, 1, k, k]
-        weight = kernel.unsqueeze(1).repeat(self.head_dim, 1, 1, 1)
-        with torch.no_grad():
-            self.fixed_shift.weight.copy_(weight)
-        self.fixed_shift.weight.requires_grad_(False)
-
-    def _localize(self, z: torch.Tensor, b: int, h: int, w: int) -> torch.Tensor:
-        # z: [B, C, H, W]
-        z = z.reshape(b * self.num_heads, self.head_dim, h, w)
-        z = self.fixed_shift(z) + self.learned_shift(z)
-        return z.reshape(
-            b, self.num_heads, self.head_dim, self.k2, h, w
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        b, c, h, w = x.shape
-        q, k, v = self.qkv(x).chunk(3, dim=1)
-
-        q = q.reshape(b, self.num_heads, self.head_dim, h, w)
-        q = q.mul(self.scale).unsqueeze(3)
-
-        k_local = self._localize(k, b, h, w) + self.relative_bias
-        v_local = self._localize(v, b, h, w)
-
-        attn = (q * k_local).sum(dim=2, keepdim=True)
-        attn = torch.softmax(attn, dim=3)
-
-        y = (attn * v_local).sum(dim=3)
-        y = y.reshape(b, c, h, w)
-        return self.proj(y)
+q, k, v = qkv.chunk(3, dim=channel)
+# then split each into heads
 ```
 
-### Important source-fidelity note
+layout and omitted the fixed-shift convolution bias. After re-reading the official `slide_swin.py::SlideAttention`, that is not an exact port of the released implementation.
 
-This is a project NCHW/dynamic-resolution adaptation of the published mechanism, not a byte-for-byte copy of upstream code. Codex must compare it against the pinned official `slide_swin.py::SlideAttention` semantics before use.
+The official code instead projects to `3*C`, permutes to NCHW, and directly reshapes to:
 
-Do not call a plain depthwise 3x3 convolution “Slide Attention.”
+```text
+[B * num_heads, 3 * head_dim, H, W]
+```
+
+before slicing q/k/v. It also freezes only the designed shift **weight**; the convolution bias remains present/trainable, and the relative-position bias is initialized with truncated normal (`std=.02`).
+
+Therefore the canonical project reference has been corrected to preserve those semantics while changing only:
+
+```text
+fixed input_resolution -> runtime H/W
+BHWC token I/O         -> NCHW I/O
+Linear projection      -> equivalent 1x1 Conv2d
+```
+
+Codex must use:
+
+```text
+reference_code/round3_companion_modules.py::SlideAttention2d
+```
+
+as the implementation reference and compare it against a pinned upstream commit before porting it to the actual YOLO repository.
+
+This correction is important: a cleaner-looking conventional head split would create a **different module**, so it must not silently be called a faithful Slide implementation.
 
 ## 4. Primary position — parallel Slide / DBRA at P3-Cls-Mid
 
@@ -166,53 +105,60 @@ P3 --------------------------------------------------------> box branch
  |
  +-> cls block-0 -> U
                    |\
-                   | -> existing DBRA adapter ------ D
+                   | -> existing fixed DBRA adapter ------ D
                    |
-                   + -> SlideAttention2d ----------- L
+                   + -> SlideAttention2d ----------------- L
 
                    Y = D + beta_local * L
                    |
                    -> cls block-1 -> predictor
 ```
 
-Because the existing DBRA adapter itself is near-identity, the DBRA branch remains the anchor.
+Reference wrapper:
 
 ```python
 class SlideDBRAParallel(nn.Module):
-    def __init__(
-        self,
-        dbra: nn.Module,
-        slide: nn.Module,
-        local_scale_init: float = 1e-3,
-    ):
+    def __init__(self, dbra, slide, local_scale_init=1e-3):
         super().__init__()
         self.dbra = dbra
         self.slide = slide
-        self.local_scale = nn.Parameter(
-            torch.tensor(float(local_scale_init))
-        )
+        self.local_scale = nn.Parameter(torch.tensor(float(local_scale_init)))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         routed = self.dbra(x)
         local = self.slide(x)
         return routed + self.local_scale * local
 ```
 
-At `local_scale=0`, this model is **exactly the DBRA model**, assuming identical DBRA weights.
+At `local_scale=0`, this is exactly the DBRA parent for identical DBRA weights.
 
-Default first-round values:
+First fixed config:
 
 ```text
-kernel_size = 3
-num_heads   = largest simple divisor <= 4 of active dim
+kernel_size      = 3
+num_heads        = largest simple divisor <= 4 of active dim
 local_scale_init = 1e-3
 ```
 
-Do not start with 5x5/7x7 neighborhoods; the point of this branch is local preservation, not another large receptive field.
+Do not begin with 5x5/7x7 neighborhoods; the point is local evidence preservation, not another large-context search.
 
-## 5. Secondary position/design — local preconditioner before DBRA
+## 5. Why parallel is preferred over serial
 
-Only after the parallel model has been understood:
+The primary hypothesis is not “Slide makes DBRA stronger.” It is:
+
+> DBRA may benefit tiny-object detection through routed non-local evidence while losing some local/contiguous evidence relevant to other cases.
+
+A parallel branch isolates that question better because:
+
+- DBRA receives the same hidden feature as before;
+- the new branch can learn a small correction;
+- disabling the branch exactly reproduces DBRA;
+- local/global branch activations can be compared directly;
+- a failure does not ambiguously mean that Slide corrupted DBRA input.
+
+## 6. Secondary design — local preconditioner before DBRA
+
+Only after the parallel model has produced an interpretable validation signal:
 
 ```text
 P3 -> cls block-0 -> U
@@ -222,34 +168,30 @@ P3 -> cls block-0 -> U
                     -> cls block-1
 ```
 
+Reference:
+
 ```python
 class SlideThenDBRA(nn.Module):
-    def __init__(self, dbra: nn.Module, slide: nn.Module, local_scale_init=1e-3):
-        super().__init__()
-        self.dbra = dbra
-        self.slide = slide
-        self.local_scale = nn.Parameter(torch.tensor(float(local_scale_init)))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         x_local = x + self.local_scale * self.slide(x)
         return self.dbra(x_local)
 ```
 
 At `local_scale=0`, it is exactly DBRA.
 
-This secondary experiment asks whether DBRA routing itself benefits from a locally refined input. It is riskier because it changes DBRA's input distribution.
+This is riskier because it changes the routing input, but it directly tests whether DBRA routing itself benefits from locally refined evidence.
 
-## 6. Why not use P4
+## 7. Why not use P4
 
-Round-2 already shows DBRA P4-mid is materially worse than P3-mid. Round-3 is testing a companion mechanism to the successful P3 path, so both Slide designs remain P3-only.
+Round-2 already shows DBRA P4-mid is materially worse than P3-mid, and SHSA P4-mid fails catastrophically. Round-3 is testing a companion mechanism to the successful P3 route, so both Slide designs remain P3-only.
 
-Do not use a P4 Slide branch to “repair medium objects” without new evidence. APm is a scale metric, not proof that the defect physically resides in the P4 feature map.
+Do not infer from lower `APm` that the physical defect “must be P4.” COCO size bins describe object size, not which pyramid level caused the error.
 
-## 7. Mandatory controls if this candidate is positive
+## 8. Mandatory control if Slide+DBRA is positive
 
-A positive Slide+DBRA result does not prove local self-attention is necessary.
+A positive result does not prove local self-attention is necessary.
 
-Run one simple matched-site control:
+Run a matched-site simple control:
 
 ```text
 DBRA + depthwise 3x3 local residual
@@ -257,11 +199,17 @@ DBRA + depthwise 3x3 local residual
 
 with comparable local-branch width/cost.
 
-If plain depthwise local evidence matches Slide, the claim should be “local evidence preservation” rather than “Slide Attention is required.”
+If it matches Slide, the supported conclusion is:
 
-Also report standalone Slide at the same P3-mid site only if needed for mechanism attribution; do not expand into a large standalone module sweep.
+> local evidence preservation complements DBRA
 
-## 8. What to log
+not:
+
+> Slide Attention specifically is required.
+
+## 9. Required diagnostics
+
+Log:
 
 ```text
 local_scale trajectory
@@ -269,45 +217,43 @@ DBRA alpha trajectory
 local branch activation RMS
 routed branch activation RMS
 cosine similarity(local, routed)
-AP/APs/APm
-ARs/ARm
+AP / APs / APm
+ARs / ARm
 FP @ matched Recall
 latency / VRAM
 ```
 
-A useful diagnostic is whether local and routed branches become nearly identical. If cosine similarity is persistently ~1, the extra branch may be redundant.
+If local/routed branch cosine similarity stays near 1, the extra branch may be redundant.
 
-## 9. Desired signature
+## 10. Desired signature
 
-The strongest result is not merely higher overall AP.
-
-Desired pattern:
+The strongest mechanism pattern is:
 
 ```text
 AP >= DBRA
 APs / ARs retained
 APm and/or ARm recover toward baseline
-matched-recall FP does not worsen
+FP @ matched Recall does not worsen
 ```
 
-If APm recovers but APs collapses, the design has traded away the main DBRA benefit and is not a clean improvement.
+If APm recovers only by sacrificing the main DBRA APs/ARs benefit, this is a scale trade-off rather than a clean improvement.
 
-## 10. Failure modes
+## 11. Stop conditions
 
 Stop or demote if:
 
-- local branch mainly increases Recall and FP together;
+- local branch increases Recall and FP together;
 - APm/ARm do not recover and APs/ARs decline;
 - learned local scale stays effectively zero;
 - the 3x3 DWConv control matches it;
-- runtime cost is disproportionate to any gain.
+- runtime cost is disproportionate to gain.
 
-## 11. Research interpretation
+## 12. Novelty boundary
 
-Slide itself is existing CVPR 2023 work and is not novelty.
+Slide is existing CVPR 2023 work and is not project novelty.
 
-The potentially interesting project-level question is broader:
+The research-level question worth preserving is:
 
-> Can a classification head preserve local contiguous evidence while separately routing non-local context, instead of forcing one representation to serve both roles?
+> Can a detection classification head preserve local contiguous evidence while separately routing non-local context, instead of forcing one representation to serve both roles?
 
-Only repeated evidence for that local/global complementarity would justify designing a water-specific dual-path module later.
+Only repeated evidence for that local/global complementarity would justify a later water-clutter-specific dual-path design.
