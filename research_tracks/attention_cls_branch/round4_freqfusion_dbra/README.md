@@ -1,36 +1,44 @@
 # Round-4 FreqFusion + DBRA — Codex README
 
-> **Use this file as the short entry point for the next implementation session.**  
+> **后续实现直接从这里启动。**  
 > Target: YOLO11n / Ultralytics 8.4.113 / PoTATO  
-> Model: **FreqFusion(P4->P3) + fixed DBRA(P3-Cls-Mid)**  
-> Loss: unchanged in this round.
+> Head parent: **fixed DBRA @ P3-Cls-Mid**  
+> New neck change: **FreqFusion only at P4 -> P3**  
+> Loss: **本轮完全不改，留到后续单独设计。**
 
 ---
 
-## 1. What to build
-
-Build exactly:
+## 1. 本轮只实现什么
 
 ```text
 YOLO11n
-  + FreqFusion at the final top-down P4->P3 fusion
-  + the already-validated DBRA at P3 classification-mid
+  + FreqFusion(P4 -> P3)
+  + 已验证 DBRA(P3 classification-mid)
 ```
 
-Do **not** add any other attention, P2 head, new loss, DFL change, TAL change, image-size change, or training-hyperparameter change.
-
-The model responsibilities are:
+两个组件职责必须分开：
 
 ```text
-FreqFusion -> reconstruct / align high- and low-resolution neck features before P3
-DBRA       -> route useful context only in the P3 classification branch
+FreqFusion -> 处理 P4 语义特征与高分辨率 P3 特征的跨尺度重建/对齐
+DBRA       -> 在最终 P3 分类分支内做内容依赖的上下文路由
+```
+
+禁止同时加入：
+
+```text
+新 loss / IoU / DFL / TAL
+P2
+GRN / Slide / FocalMod / 其他 attention
+imgsz 改动
+augmentation / optimizer / LR / epoch 改动
+DBRA 参数或位置改动
 ```
 
 ---
 
-## 2. Required reading order
+## 2. 必读文件
 
-From repository root, read:
+按顺序读取：
 
 ```text
 research_tracks/attention_cls_branch/05_BASELINE_AND_TRAINING_PROTOCOL.md
@@ -42,38 +50,45 @@ research_tracks/attention_cls_branch/reference_code/test_freqfusion_yolo_adapter
 research_tracks/attention_cls_branch/17_CODEX_ROUND4_FREQFUSION_DBRA_PLAN.md
 ```
 
-Then inspect the **actual working DBRA P3-mid implementation and YAML** in the real YOLO engineering repository. Preserve that DBRA implementation exactly.
+随后必须读取真实 YOLO 工程中**已经跑通并产生当前 DBRA 结果的实现和 YAML**。不要从本 README 猜 DBRA API。
 
 ---
 
-## 3. Critical architecture rule
+## 3. 最容易实现错的地方
 
-Do not implement FreqFusion as:
+### FreqFusion 不是单输入上采样器
+
+错误：
 
 ```text
-P4 -> FreqFusion -> P3 concat
+P4 -> FreqFusion -> Concat(P3)
 ```
 
-FreqFusion is a **two-input fusion operator**.
-
-Correct graph:
+正确：
 
 ```text
 backbone P3 (HR) ---------\
-                           -> FreqFusionConcat -> C3k2 -> P3 -> DBRA cls-mid
+                           -> FreqFusionConcat -> C3k2 -> P3' -> DBRA cls-mid
 fused P4 (LR) ------------/
 ```
 
-The wrapper performs:
+调用：
 
 ```python
-_, hr_refined, lr_up = freqfusion(hr_feat=backbone_p3, lr_feat=fused_p4)
-out = torch.cat([hr_refined, lr_up], dim=1)
+_, hr_refined, lr_reconstructed = freqfusion(
+    hr_feat=backbone_p3,
+    lr_feat=fused_p4,
+)
+out = torch.cat((hr_refined, lr_reconstructed), dim=1)
 ```
 
-Therefore it replaces the stock YOLO11 **second `Upsample + Concat` pair together**.
+所以 `FreqFusionConcat` 一次性替换原 YOLO11 最后一次 top-down 的：
 
-Input order is mandatory:
+```text
+nearest x2 + Concat(backbone P3)
+```
+
+输入顺序固定：
 
 ```text
 [HR, LR] = [backbone P3, fused P4]
@@ -81,55 +96,79 @@ Input order is mandatory:
 
 ---
 
-## 4. FreqFusion source lock
-
-Use / verify:
+## 4. 上游源码固定
 
 ```text
-upstream: https://github.com/Linwei-Chen/FreqFusion
-commit:   3fb0c70637a3c194fb74294d3ce4681958b26241
-file:     FreqFusion.py
-blob:     b8fa94d418c3094a8d6653712b65037f70daccec
+repo:   https://github.com/Linwei-Chen/FreqFusion
+commit: 3fb0c70637a3c194fb74294d3ce4681958b26241
+file:   FreqFusion.py
+blob:   b8fa94d418c3094a8d6653712b65037f70daccec
 ```
 
-Before copying upstream code into another repository, verify redistribution/license terms and record provenance. The project reference adapter does **not** copy the upstream implementation.
+复制上游代码前先确认 license/redistribution 条款并记录 provenance。
 
-Primary Round-4 profile follows the official clean-code defaults:
-
-```text
-compressed_channels=64
-lowpass_kernel=5
-highpass_kernel=3
-feature_resample=False
-comp_feat_upsample=True
-use_high_pass=True
-use_low_pass=True
-hr_residual=True
-semi_conv=True
-hamming_window=True
-```
-
-Do not enable offset-guided `feature_resample` in the first candidate.
+如果使用 pinned clean source 的非-MMCV CARAFE fallback，需要删除其中 tensor-shape 的 debug `print(...)`，并在 `SOURCE.md` 记录为 semantic-neutral patch。
 
 ---
 
-## 5. Expected custom module
+## 5. 主配置不是 clean-demo 默认，而是官方 detection profile
 
-Port:
+官方 Faster R-CNN/COCO FreqFusion 配置启用了 resampling。因此本轮主模型固定：
 
 ```text
-reference_code/freqfusion_yolo_adapter.py::FreqFusionConcat
+compress_ratio=8
+compressed_channels=(C_hr+C_lr)//8
+lowpass_kernel=5
+highpass_kernel=3
+feature_resample=True
+feature_resample_group=4
+semi_conv=True
+use_high_pass=True
+use_low_pass=True
+comp_feat_upsample=True
+hr_residual=True
+hamming_window=True
+feature_resample_norm=True
 ```
 
-Suggested production location:
+`feature_resample=False` 只作为**主模型有效之后的机制消融**，不是首版默认。
+
+---
+
+## 6. 参考实现
+
+项目自写 adapter：
+
+```text
+research_tracks/attention_cls_branch/reference_code/freqfusion_yolo_adapter.py
+```
+
+核心类：
+
+```python
+FreqFusionConcat
+FreqFusionConcatDebug
+```
+
+参考测试：
+
+```text
+research_tracks/attention_cls_branch/reference_code/test_freqfusion_yolo_adapter.py
+```
+
+建议移植到真实 YOLO 工程：
 
 ```text
 ultralytics/nn/modules/freqfusion_yolo.py
 ```
 
-Add the class to the Ultralytics module import chain and `tasks.py` namespace.
+不要把 detector 实现塞进本仓库 `detection-failure-probe/src`。
 
-`parse_model()` special case:
+---
+
+## 7. parser 接入
+
+在 `parse_model()` 增加显式多输入分支：
 
 ```python
 elif m is FreqFusionConcat:
@@ -140,145 +179,105 @@ elif m is FreqFusionConcat:
     c2 = hr_c + lr_c
 ```
 
+不要把它当普通单输入 base module。
+
 ---
 
-## 6. YAML rule
+## 8. YAML 接入
 
-Start from the **actual accepted DBRA parent YAML**, not stock YOLO11.
+必须从真实 DBRA parent YAML 修改。
 
-Replace only the final top-down P4->P3 pair:
-
-```text
-nearest x2
-+ concat backbone P3
-```
-
-with:
+stock-like 语义示例：
 
 ```yaml
-[[backbone_p3_index, fused_p4_index], 1, FreqFusionConcat, []]
+# fused P4 已存在
+- [[4, 13], 1, FreqFusionConcat, []]   # HR=P3, LR=P4
+- [-1, 2, C3k2, [256, False]]         # new P3
+...
+- [[15, 18, 21], 1, AttnDetect, <EXACT_EXISTING_DBRA_ARGS>]
 ```
 
-Then update downstream indices while keeping the existing DBRA head arguments untouched.
-
-For stock-like indexing, the expected new Detect inputs become:
-
-```text
-P3/P4/P5 = [15, 18, 21]
-```
-
-instead of stock `[16, 19, 22]`.
-
-Do not trust these numbers if the real working DBRA YAML differs; derive them from the actual graph.
+节点减少会导致后续 index 变化。真实 index 必须通过实际 parent graph 重算，不要照抄示例数字。
 
 ---
 
-## 7. Weight-transfer warning
+## 9. 权重迁移是强制门禁
 
-Because replacing two YAML nodes with one can shift `model.<index>` keys, a partial weight-load log is not enough.
+因为 `Upsample + Concat` 两节点合成一个，后续 `model.<index>` 可能整体偏移。
 
-Before training, create:
+必须生成：
 
 ```text
 implementation/ROUND4_PARENT_CONFIG_DIFF.md
 ```
 
-and audit:
+并逐项审计：
 
 ```text
-parent DBRA state_dict keys
-R4 state_dict keys
-semantic key remaps caused by index shift
-new FreqFusion parameters
-DBRA weight transfer
-backbone / neck transfer
+parent DBRA keys
+R4 keys
+仅因 index shift 改名的语义同一模块
+显式 remap 后的加载结果
+DBRA 权重是否完整迁移
+FreqFusion 新参数列表
 ```
 
-If downstream weights fail only because numeric indices shifted, explicitly remap them or use a graph-preserving integration strategy. Do not silently train with a large unintended random portion of YOLO.
+不能只看 `Transferred X/Y items`。
 
 ---
 
-## 8. Gates before long training
-
-Required:
+## 10. 长训练前门禁
 
 ```text
-[ ] source/provenance verified
-[ ] module import
-[ ] YAML parse
-[ ] model build
-[ ] 2:1 HR/LR spatial assertion
-[ ] output channel assertion
-[ ] Detect strides remain 8/16/32
-[ ] DBRA config/site unchanged
-[ ] parent-to-R4 weight-transfer audit
-[ ] finite FP32 forward
-[ ] finite AMP forward if applicable
-[ ] finite loss/backward
-[ ] FreqFusion ALPF/AHPF gradients finite
-[ ] DBRA gradients finite
-[ ] smoke train
-[ ] smoke val
-[ ] smoke predict
-[ ] Params/GFLOPs/VRAM/latency measured
+[ ] 上游来源/授权确认
+[ ] import / YAML parse / model build
+[ ] HR/LR 顺序正确
+[ ] H_hr = 2*H_lr, W_hr = 2*W_lr
+[ ] 输出通道 = C_hr + C_lr
+[ ] Detect stride 仍为 8/16/32
+[ ] DBRA class/config/site 与 parent 完全一致
+[ ] parent -> R4 权重迁移审计
+[ ] FP32 forward/loss/backward finite
+[ ] AMP finite（若正式协议启用）
+[ ] ALPF/AHPF/resampler 都有 finite gradient
+[ ] DBRA gradient finite
+[ ] 1-epoch smoke train
+[ ] smoke val / predict
+[ ] Params/GFLOPs/VRAM/latency
 ```
 
-Before long training generate:
+全部通过后先生成：
 
 ```text
 ROUND4_FREQFUSION_DBRA_INTEGRATION_REPORT.md
 ```
 
----
-
-## 9. Formal training rule
-
-Reuse the frozen parent protocol exactly.
-
-Do not retrain the frozen baseline merely to start this experiment. Do not give R4 an extra training budget by loading an already fully trained DBRA checkpoint and continuing for another full schedule as the headline comparison.
-
-The fair comparison is:
-
-```text
-existing DBRA parent result
-vs
-R4-FD1 trained with the same allowed initialization and frozen optimization budget
-```
-
-Architecture selection is validation-side. Do not use the repeatedly evaluated test set to tune FreqFusion settings.
+再允许长训练。
 
 ---
 
-## 10. First ablation table
-
-Only:
+## 11. 正式实验只需要这一张初始消融
 
 ```text
-A0 YOLO11n baseline                    reuse
-A1 YOLO11n + DBRA P3-mid              reuse
-A2 YOLO11n + FreqFusion P4->P3 + DBRA train
+A0 YOLO11n baseline                                  reuse
+A1 YOLO11n + DBRA P3-mid                            reuse
+A2 YOLO11n + DBRA + detection-profile FreqFusion   train
 ```
 
-If A2 is positive on frozen validation, then separately register **one** follow-up:
+如果 A2 validation 正向，再做：
 
 ```text
-feature_resample=True
+A3-core: A2 but feature_resample=False
 ```
 
-or
+用来判断增益来自 ALPF+AHPF 本身，还是 local-similarity-guided resampling 也有贡献。
 
-```text
-two-site FreqFusion
-```
-
-not both at once.
+损失函数放到下一阶段，绝对不要和 A2 同时改。
 
 ---
 
-## 11. Codex startup prompt
-
-Copy this directly into Codex:
+## 12. Codex 一句话启动提示词
 
 ```text
-Implement Round-4 FreqFusion + DBRA. First read research_tracks/attention_cls_branch/05_BASELINE_AND_TRAINING_PROTOCOL.md, 07_DBRA.md, 11_ROUND2_TEST_EVIDENCE_AND_ROUND3_HYPOTHESES.md, 16_ROUND4_FREQFUSION_DBRA_DESIGN.md, reference_code/freqfusion_yolo_adapter.py, reference_code/test_freqfusion_yolo_adapter.py, and 17_CODEX_ROUND4_FREQFUSION_DBRA_PLAN.md. Then inspect the actual accepted DBRA P3-mid implementation/YAML in the YOLO11 engineering repo. Build exactly one candidate: fixed DBRA P3-Cls-Mid plus FreqFusion only at the P4->P3 top-down fusion. FreqFusion is a two-input operator and must replace the second Upsample+Concat pair as FreqFusionConcat([backbone_P3, fused_P4]); do not implement it as a one-input upsampler. Pin upstream FreqFusion to commit 3fb0c70637a3c194fb74294d3ce4681958b26241 and verify redistribution/license terms before vendoring. Use the official-default first profile with feature_resample=False. Do not change DBRA, loss, TAL, DFL, imgsz, augmentation, optimizer, schedule, dataset split, or baseline. Add module import/parser support, build the exact YAML, audit all weight transfers caused by possible index shifts, run unit/gradient/shape tests and smoke train/val/predict, profile cost, and generate ROUND4_FREQFUSION_DBRA_INTEGRATION_REPORT.md. Only after all gates pass should you start formal training with the frozen parent protocol; select on validation only.
+读取 research_tracks/attention_cls_branch/round4_freqfusion_dbra/README.md，并严格按其中“必读文件”顺序读取全部 Round-4 资料，然后检查真实 YOLO11 工程中已验证的 DBRA P3-mid 实现/YAML。实现唯一候选：固定 DBRA P3-Cls-Mid + FreqFusion 仅用于最后的 P4->P3 top-down fusion。FreqFusion 必须作为双输入 FreqFusionConcat([backbone_P3, fused_P4]) 一次性替代原第二组 Upsample+Concat，并保留 YOLO 的 concat 融合语义。上游固定为 Linwei-Chen/FreqFusion commit 3fb0c70637a3c194fb74294d3ce4681958b26241；复制前核对授权。主配置使用官方 object-detection profile：compress_ratio=8、lowpass=5、highpass=3、feature_resample=True、feature_resample_group=4、semi_conv=True、高低通均启用。不要修改 DBRA、loss、TAL、DFL、imgsz、augmentation、optimizer、训练周期、数据划分或 baseline。完成 module/parser/YAML 接入后，必须处理节点 index 改变带来的 state-dict 权重迁移，完成逐键审计、shape/gradient/unit tests、smoke train/val/predict 和性能开销测试，并先生成 ROUND4_FREQFUSION_DBRA_INTEGRATION_REPORT.md。所有门禁通过后，才按冻结协议训练 A2，并只使用 validation 做选择。
 ```
