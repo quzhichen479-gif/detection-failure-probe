@@ -51,19 +51,23 @@ class GRN2d(nn.Module):
 
 
 class SlideAttention2d(nn.Module):
-    """Dynamic-resolution NCHW Slide-style local self-attention.
+    """Dynamic-resolution NCHW port of upstream SlideAttention semantics.
 
-    Source-fidelity points retained from the published/official mechanism:
-    - per-position Q/K/V projection;
+    This intentionally mirrors the official Slide-Swin implementation's layout:
+    qkv is projected to 3*C channels, then reshaped directly to
+    [B*num_heads, 3*head_dim, H, W] before q/k/v slicing. That layout may look unusual,
+    but changing it to a conventional q/k/v-then-head split creates a different module.
+
+    Other upstream details retained:
     - local k x k K/V neighborhood;
-    - frozen depthwise shift extractor;
+    - frozen designed depthwise-shift WEIGHTS;
+    - fixed-shift bias remains trainable, matching upstream Conv2d behavior;
     - parallel learnable depthwise shift/deformation path;
-    - relative local bias;
+    - truncated-normal relative local bias;
     - softmax over k^2 local neighbors.
 
-    This is a project adaptation, not a byte-for-byte copy of upstream SlideAttention.
-    Before production use, Codex must compare behavior against the pinned official
-    implementation and document any semantic differences.
+    Project-only changes are dynamic H/W, NCHW I/O, and Conv2d(1x1) replacing the
+    equivalent per-token Linear projections.
     """
 
     def __init__(
@@ -96,7 +100,7 @@ class SlideAttention2d(nn.Module):
             kernel_size=self.kernel_size,
             padding=self.kernel_size // 2,
             groups=self.head_dim,
-            bias=False,
+            bias=True,
         )
         self.learned_shift = nn.Conv2d(
             self.head_dim,
@@ -111,6 +115,7 @@ class SlideAttention2d(nn.Module):
             torch.zeros(1, self.num_heads, 1, self.num_neighbors, 1, 1)
         )
         self._init_fixed_shift()
+        nn.init.trunc_normal_(self.relative_bias, std=0.02)
 
     def _init_fixed_shift(self) -> None:
         k = self.kernel_size
@@ -118,23 +123,46 @@ class SlideAttention2d(nn.Module):
         for idx in range(self.num_neighbors):
             base[idx, 0, idx // k, idx % k] = 1.0
 
-        # For groups=head_dim, every input channel owns a contiguous block of k^2
-        # output channels, each extracting one neighborhood shift.
         weight = base.repeat(self.head_dim, 1, 1, 1)
         with torch.no_grad():
             self.fixed_shift.weight.copy_(weight)
+        # Match upstream: only the designed kernel weights are frozen.
         self.fixed_shift.weight.requires_grad_(False)
 
-    def _extract_local(
-        self,
-        z: torch.Tensor,
-        batch: int,
-        height: int,
-        width: int,
-    ) -> torch.Tensor:
-        z = z.reshape(batch * self.num_heads, self.head_dim, height, width)
-        z = self.fixed_shift(z) + self.learned_shift(z)
-        return z.reshape(
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, channels, height, width = x.shape
+        if channels != self.dim:
+            raise ValueError(f"expected C={self.dim}, got C={channels}")
+
+        # Source-faithful layout: qkv -> [B*heads, 3*head_dim, H, W] directly.
+        packed = self.qkv(x).reshape(
+            batch * self.num_heads,
+            3 * self.head_dim,
+            height,
+            width,
+        )
+        q = packed[:, : self.head_dim]
+        k = packed[:, self.head_dim : 2 * self.head_dim]
+        v = packed[:, 2 * self.head_dim :]
+
+        q = (q * self.scale).reshape(
+            batch,
+            self.num_heads,
+            self.head_dim,
+            1,
+            height,
+            width,
+        )
+
+        k = (self.fixed_shift(k) + self.learned_shift(k)).reshape(
+            batch,
+            self.num_heads,
+            self.head_dim,
+            self.num_neighbors,
+            height,
+            width,
+        )
+        v = (self.fixed_shift(v) + self.learned_shift(v)).reshape(
             batch,
             self.num_heads,
             self.head_dim,
@@ -143,24 +171,11 @@ class SlideAttention2d(nn.Module):
             width,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch, channels, height, width = x.shape
-        if channels != self.dim:
-            raise ValueError(f"expected C={self.dim}, got C={channels}")
-
-        q, k, v = self.qkv(x).chunk(3, dim=1)
-        q = q.reshape(batch, self.num_heads, self.head_dim, height, width)
-        q = (q * self.scale).unsqueeze(3)
-
-        k_local = self._extract_local(k, batch, height, width)
-        v_local = self._extract_local(v, batch, height, width)
-
-        logits = (q * k_local).sum(dim=2, keepdim=True)
-        logits = logits + self.relative_bias
+        k = k + self.relative_bias
+        logits = (q * k).sum(dim=2, keepdim=True)
         attn = torch.softmax(logits, dim=3)
 
-        y = (attn * v_local).sum(dim=3)
-        y = y.reshape(batch, channels, height, width)
+        y = (attn * v).sum(dim=3).reshape(batch, channels, height, width)
         return self.proj(y)
 
 
