@@ -14,13 +14,12 @@ import argparse
 import csv
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import torch
-from torch import Tensor
-
 from srb_iou import rb_iou_v0_loss, srb_iou_loss
+from torch import Tensor
 
 LossFn = Callable[[Tensor, Tensor], Tensor]
 
