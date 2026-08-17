@@ -56,3 +56,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 "src/failure_probe/report.py" = ["E501"]  # Embedded HTML template.
 "src/failure_probe/review.py" = ["E501"]  # Embedded zero-build HTML/JS application.
+"research_tracks/water_clutter_response_probe/probe_core.py" = ["E501", "I001", "UP035"]
+"research_tracks/water_clutter_response_probe/run_probe.py" = ["E501"]
+"research_tracks/water_clutter_response_probe/ultralytics_adapter.py" = ["I001"]
