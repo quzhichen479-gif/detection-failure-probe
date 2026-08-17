@@ -1,0 +1,60 @@
+# Copy this file OUTSIDE the research repository or edit a local copy in the YOLO11 workspace.
+# Do not commit machine-specific checkpoint paths unless desired.
+
+baseline_weights: C:/ABSOLUTE/PATH/TO/yolo11n_baseline_best.pt
+dbra_weights: C:/ABSOLUTE/PATH/TO/dbra_p3_mid_best.pt
+dataset_yaml: C:/ABSOLUTE/PATH/TO/potato.yaml
+
+# Hard rule: validation/audit only. run_probe.py rejects any split containing "test".
+split: val
+
+# These MUST match the frozen Baseline/DBRA comparison protocol.
+imgsz: 640
+conf: 0.001
+iou_nms: 0.7
+device: "0"
+
+# Reproducibility.
+probe_seed: 3407
+run_id: null
+output_dir: outputs/water_response_probe
+
+# Use 0 for all validation images. Use >=300 only for an initial screen if full val is too expensive.
+max_images: 300
+sanity_images: 20
+
+# Primary perturbations. "null" is always inserted even if omitted here.
+perturbations:
+  - null
+  - photometric
+  - glare
+  - ripple
+  - highfreq
+
+# S1/S2/S3 nuisance intensity.
+strengths: [0.35, 0.70, 1.00]
+
+# Glare/ripple/high-frequency interventions are evaluated near and far from GT.
+regions: [near, far]
+
+# GT protection: intervention never modifies this expanded region.
+min_protect_px: 8
+protect_fraction: 0.25
+near_radius_px: 64
+
+# Frozen matching definitions.
+tp_iou: 0.50
+strict_fp_iou: 0.10
+fp_correspondence_iou: 0.30
+tp_correspondence_gt_iou: 0.10
+high_conf_threshold: 0.75
+
+# Pre-NMS fixed-candidate capture:
+# auto     -> use if Ultralytics Detect output is compatible, otherwise continue primary probe
+# required -> abort if raw capture cannot be obtained
+# off      -> post-NMS paired correspondence only
+raw_candidate_mode: auto
+
+bootstrap_reps: 500
+null_tolerance: 0.00001
+fp_review_top_k: 100
