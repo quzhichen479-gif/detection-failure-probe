@@ -131,7 +131,8 @@ If the raw scale causes obvious optimization failure, stop and report it as evid
 
 Do not replace
 
-```python\stable_log_cosh(x)
+```python
+stable_log_cosh(x)
 ```
 
 with
