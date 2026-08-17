@@ -13,7 +13,6 @@ from __future__ import annotations
 import math
 
 import torch
-
 from srb_iou import srb_iou_loss, stable_log_cosh
 
 
