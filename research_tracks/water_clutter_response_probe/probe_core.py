@@ -489,10 +489,24 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     high_fp = [
         float(r["abs_delta_score"])
         for r in rows
-        if r["candidate_type"] == "strict_background_fp" and float(r["score_x"]) >= 0.75
+        if r["candidate_type"] == "strict_background_fp"
+        and bool(r.get("high_conf_fp", float(r["score_x"]) >= 0.75))
+    ]
+    raw_tp = [
+        float(r["pre_nms_abs_delta"])
+        for r in rows
+        if r["candidate_type"] == "tp" and r.get("pre_nms_abs_delta") is not None
+    ]
+    raw_fp = [
+        float(r["pre_nms_abs_delta"])
+        for r in rows
+        if r["candidate_type"] == "strict_background_fp"
+        and r.get("pre_nms_abs_delta") is not None
     ]
     med_tp = safe_median(tp)
     med_fp = safe_median(fp)
+    raw_med_tp = safe_median(raw_tp)
+    raw_med_fp = safe_median(raw_fp)
     return {
         "n_rows": len(rows),
         "n_tp": len(tp),
@@ -506,6 +520,16 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "auc_tp_vs_strict_fp": sensitivity_auc(tp, fp),
         "auc_tp_vs_high_conf_fp": sensitivity_auc(tp, high_fp),
+        "n_pre_nms_tp": len(raw_tp),
+        "n_pre_nms_strict_fp": len(raw_fp),
+        "pre_nms_median_abs_delta_tp": raw_med_tp,
+        "pre_nms_median_abs_delta_strict_fp": raw_med_fp,
+        "pre_nms_sensitivity_ratio": (
+            None
+            if raw_med_tp is None or raw_med_fp is None
+            else raw_med_fp / max(raw_med_tp, 1e-9)
+        ),
+        "pre_nms_auc_tp_vs_strict_fp": sensitivity_auc(raw_tp, raw_fp),
         "tp_disappearance_rate": (
             None
             if not tp
