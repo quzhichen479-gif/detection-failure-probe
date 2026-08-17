@@ -8,9 +8,8 @@ signature and coordinate system there.
 from __future__ import annotations
 
 import torch
-from torch import Tensor
-
 from srb_iou import srb_iou_loss
+from torch import Tensor
 
 
 def positive_stride_values(stride_tensor: Tensor, fg_mask: Tensor) -> Tensor:
