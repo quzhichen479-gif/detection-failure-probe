@@ -11,7 +11,6 @@ repository does not declare PyTorch as a hard dependency.
 from __future__ import annotations
 
 import torch
-
 from losses import (
     bbox_iou_xyxy,
     eiou_loss,
@@ -22,7 +21,14 @@ from losses import (
 )
 
 
-def _box(cx: float, cy: float, w: float, h: float, *, dtype: torch.dtype = torch.float64) -> torch.Tensor:
+def _box(
+    cx: float,
+    cy: float,
+    w: float,
+    h: float,
+    *,
+    dtype: torch.dtype = torch.float64,
+) -> torch.Tensor:
     return torch.tensor(
         [[cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]],
         dtype=dtype,
