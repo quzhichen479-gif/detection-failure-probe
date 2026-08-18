@@ -21,8 +21,8 @@ import csv
 import json
 from pathlib import Path
 
-from opc_inner_eiou import bbox_iou_xyxy, opc_ratio, scale_boxes_about_center
 import torch
+from opc_inner_eiou import bbox_iou_xyxy, opc_ratio, scale_boxes_about_center
 
 
 REQUIRED_COLUMNS = (
