@@ -1,0 +1,94 @@
+track: opc_inner_eiou
+status: pre_training_candidate
+framework:
+  ultralytics: 8.4.113
+  model: YOLO11n
+
+historical_controls:
+  baseline:
+    reuse_existing_result: true
+    retrain: false
+  L1_EIoU:
+    reuse_existing_result: true
+    retrain: false
+  L3_Inner_EIoU_r0_0_8:
+    reuse_existing_result: true
+    retrain: false
+    role: current_best_loss_control
+  L2_Inner_EIoU_1_2:
+    reuse_existing_result: true
+    retrain: false
+    role: evidence_against_enlargement
+  L4_SQA_Inner_EIoU:
+    reuse_existing_result: true
+    retrain: false
+    role: evidence_against_quality_switching_that_reintroduces_r_gt_1
+
+candidate:
+  id: L5
+  name: OPC-Inner-EIoU
+  r0: 0.8
+  controller_detached: true
+  ratio_bounds: [0.8, 1.0]
+  allow_ratio_above_1: false
+  extra_loss_terms: none
+
+pretraining_gate:
+  required: true
+  source: frozen_validation_matched_boxes_only
+  script: audit_overlap_risk.py
+  bins:
+    - u <= 0.8
+    - 0.8 < u < 1.0
+    - u >= 1.0
+  recommended_min_transition_fraction: 0.01
+  interpretation: >-
+    If 0.8<u<1 is almost absent, OPC modifies too few matched cases to justify
+    a full training run. This is an engineering gate, not a significance test.
+
+implementation_gate:
+  - reference_tests_pass
+  - model_build_pass
+  - one_batch_forward_finite
+  - backward_gradients_finite
+  - amp_forward_backward_finite
+  - verify_bbox_loss_is_L5
+  - verify_DFL_unchanged
+  - verify_TAL_unchanged
+
+training:
+  run_new_full_training: true
+  candidate_only: L5
+  initialization: same_as_frozen_baseline_protocol
+  seed: same_as_frozen_protocol
+  epochs: same_as_frozen_protocol
+  imgsz: same_as_frozen_protocol
+  batch: same_as_frozen_protocol
+  optimizer: same_as_frozen_protocol
+  lr_schedule: same_as_frozen_protocol
+  augmentation: same_as_frozen_protocol
+  dataset_split: same_as_frozen_protocol
+  evaluator: same_as_frozen_protocol
+  forbidden:
+    - ratio_grid_search
+    - DBRA_combination
+    - NWD_stack
+    - WIoU_stack
+    - Focaler_stack
+    - SQA_revival
+    - test_set_model_selection
+
+primary_comparison:
+  - L3_Inner_EIoU_r0_0_8
+  - L5_OPC_Inner_EIoU
+
+success_rule:
+  primary: L5 mAP50-95 > L3 mAP50-95 under frozen validation
+  localization_guard: L5 mAP75 should not materially erase the L3 localization gain
+  preferred_pattern: >-
+    Preserve L3 high-IoU localization quality while improving recall, mAP50,
+    or overall mAP50-95 by repairing the fixed-r0 overlap-collapse band.
+
+stop_rule: >-
+  After L5 training/evaluation and report generation, stop. Do not automatically
+  tune r0, controller shape, or combine L5 with DBRA based on validation/test.
