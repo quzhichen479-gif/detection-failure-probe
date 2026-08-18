@@ -1,0 +1,79 @@
+track: sqa_inner_eiou
+status: preregistered
+ultralytics_version: 8.4.113
+model_family: YOLO11n
+imgsz: 640
+
+hard_constraints:
+  - reuse_frozen_baseline_result
+  - do_not_retrain_baseline
+  - keep_dataset_split_unchanged
+  - keep_training_recipe_identical_to_frozen_protocol
+  - keep_TAL_unchanged
+  - keep_DFL_unchanged
+  - keep_classification_loss_unchanged
+  - keep_model_architecture_unchanged_for_loss_only_runs
+  - do_not_use_test_for_selection
+  - do_not_tune_loss_gain_in_first_pass
+
+experiments:
+  L1:
+    name: EIoU
+    enabled: true
+    parameters: {}
+    question: Does explicit EIoU center/width/height geometry help by itself?
+  L2:
+    name: Inner-EIoU-broad
+    enabled: true
+    parameters:
+      ratio: 1.2
+    question: Does a broadened auxiliary overlap basin help coarse/low-quality regression?
+  L3:
+    name: Inner-EIoU-fine
+    enabled: true
+    parameters:
+      ratio: 0.8
+    question: Does a contracted auxiliary overlap region improve fine/high-quality regression?
+  L4:
+    name: SQA-Inner-EIoU
+    enabled: true
+    parameters:
+      eta: 0.20
+      controller: smoothstep
+      detach_quality: true
+    question: Can one quality-adaptive geometry unify broad-basin and fine-regression behavior?
+
+formal_order:
+  - L1
+  - L2
+  - L3
+  - L4
+
+selection_metrics:
+  primary:
+    - mAP50-95
+  secondary:
+    - APs
+    - ARs
+    - AP75
+    - APm
+    - ARm
+  diagnostics:
+    - box_loss_mean
+    - foreground_count
+    - ratio_mean_L4
+    - ratio_p10_L4
+    - ratio_p50_L4
+    - ratio_p90_L4
+
+combination_gate:
+  description: Only consider DBRA + loss after the loss-alone run is credible on frozen validation.
+  minimum_conditions:
+    - no_material_drop_in_mAP50-95_vs_frozen_baseline
+    - no_material_drop_in_APs_vs_frozen_baseline
+    - no_numerical_instability
+
+notes:
+  - L2 and L3 are mechanism controls, not hyperparameter-search points.
+  - L4 eta=0.20 is preregistered; do not tune before the first complete comparison.
+  - Use frozen validation for model selection and mechanism analysis; reserve test for final confirmation only.
