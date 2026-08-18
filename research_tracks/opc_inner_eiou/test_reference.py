@@ -10,8 +10,6 @@ kept outside the package-level pytest suite.
 
 from __future__ import annotations
 
-import torch
-
 from opc_inner_eiou import (
     bbox_iou_xyxy,
     inner_eiou_loss,
@@ -21,6 +19,7 @@ from opc_inner_eiou import (
     opc_ratio_from_u,
     scale_boxes_about_center,
 )
+import torch
 
 
 def _box(
