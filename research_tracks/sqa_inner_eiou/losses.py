@@ -35,7 +35,10 @@ def _validate_boxes(pred: Tensor, target: Tensor) -> None:
         raise ValueError("pred and target must share shape (..., 4) in xyxy format")
 
 
-def _box_geometry(boxes: Tensor, eps: float) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+def _box_geometry(
+    boxes: Tensor,
+    eps: float,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     x1, y1, x2, y2 = boxes.unbind(dim=-1)
     w = (x2 - x1).clamp_min(eps)
     h = (y2 - y1).clamp_min(eps)
