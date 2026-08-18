@@ -7,9 +7,8 @@ implemented here and must remain on the original Ultralytics code path.
 
 from __future__ import annotations
 
-from torch import Tensor
-
 from losses import loss_by_id
+from torch import Tensor
 
 
 def weighted_loss_for_ultralytics(
