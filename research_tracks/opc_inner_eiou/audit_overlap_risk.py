@@ -24,7 +24,6 @@ from pathlib import Path
 import torch
 from opc_inner_eiou import bbox_iou_xyxy, opc_ratio, scale_boxes_about_center
 
-
 REQUIRED_COLUMNS = (
     "pred_x1",
     "pred_y1",
