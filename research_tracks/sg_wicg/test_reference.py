@@ -6,7 +6,7 @@ Run before touching Ultralytics integration:
 
 import torch
 
-from sg_wicg import (
+from research_tracks.sg_wicg.sg_wicg import (
     SGWICGBoxLoss,
     SGWICGConfig,
     WiseFocus,
@@ -56,7 +56,6 @@ def test_non_overlap_gcd_is_finite_and_has_gradient():
 
 
 def test_scale_gate_is_monotonic_and_centered():
-    # stride=1, square targets with short sides 8,12,16 px
     target = torch.tensor([[0.0, 0.0, 8.0, 8.0], [0.0, 0.0, 12.0, 12.0], [0.0, 0.0, 16.0, 16.0]])
     lam, short = scale_gate_from_target(target, torch.ones(3), tau_px=12.0, temp_px=2.0)
     assert short.tolist() == [8.0, 12.0, 16.0]
@@ -68,7 +67,7 @@ def test_wise_tal_weighted_mean_is_one():
     plain_iou = torch.tensor([0.1, 0.4, 0.7, 0.9])
     tal_weight = torch.tensor([0.2, 0.5, 0.9, 0.4])
     wise = WiseFocus()
-    wise.eval()  # do not update EMA in this deterministic test
+    wise.eval()
     gain, _ = wise(plain_iou, tal_weight, update_state=False)
     weighted_mean = (gain * tal_weight).sum() / tal_weight.sum()
     assert torch.allclose(weighted_mean, torch.tensor(1.0), atol=1e-6)
