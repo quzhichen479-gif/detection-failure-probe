@@ -112,9 +112,9 @@ A0–A4 have no Wise EMA state.
 
 ## DDP scope
 
-The reference module contains optional distributed reductions, but a subtle condition remains: stock `v8DetectionLoss` calls `BboxLoss` only when the local rank has foreground positives. A collective inside A5 can therefore deadlock if another rank has zero positives. **For the first six-cell ablation, run A5 on one GPU.** If multi-GPU A5 is later required, move Wise population-stat synchronization to a code path executed by every rank each step, including ranks with zero positives, and add a dedicated DDP test.
+The v1 reference code deliberately implements **single-GPU Wise population statistics only**. This is intentional. Stock `v8DetectionLoss` calls `BboxLoss` only when the local rank has foreground positives, so putting a collective inside A5 can deadlock when another rank has zero positives.
 
-Do not claim DDP support merely because `torch.distributed.all_reduce` appears in the reference implementation.
+**For the first six-cell ablation, run A5 on one GPU.** If multi-GPU A5 is later required, move Wise population-stat synchronization to a code path executed by every rank every step, including ranks with zero positives, then add a dedicated DDP parity/deadlock test. Do not claim DDP support before that work is done.
 
 ## Required pre-training tests
 
