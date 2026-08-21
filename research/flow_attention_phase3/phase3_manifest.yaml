@@ -1,0 +1,94 @@
+project: flow_attention_phase3
+status: implementation_ready
+baseline:
+  id: B0
+  rerun: false
+  protocol: flow_pbm_protocol_seed79
+  dataset: FloW-Img Roboflow v2
+  images: 2000
+  instances: 5272
+  split:
+    train: 1400
+    val: 200
+    test: 400
+  split_seed: 79
+  train_seed: 79
+  model: YOLO11n
+  initialization: scratch
+  pretrained: false
+  imgsz: 640
+  epochs: 300
+  batch: 32
+  optimizer: SGD
+  lr0: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  checkpoint_rule: best validation mAP50-95
+  test_policy: evaluate only after training completes
+  test_metrics:
+    precision: 0.905838
+    recall: 0.821902
+    map50: 0.872033
+    map50_95: 0.452200
+    ap75: 0.395600
+    ap_small: 0.326085
+    recall_small: 0.424346
+
+frozen:
+  - split_manifest
+  - training_arguments
+  - optimizer
+  - augmentation
+  - loss
+  - head_topology
+  - evaluator
+  - checkpoint_selection
+  - confidence_and_nms_policy
+
+insertion_contract:
+  target: final fused P3/8 feature after head C3k2
+  mode: detect_only_side_branch
+  preserve_bottom_up_pan_input: true
+  reason: isolate attention effect on the small-object detection branch without changing P4/P5 construction
+
+experiments:
+  A1:
+    module: EMAAttention
+    args: [8]
+    description: Efficient Multi-Scale Attention, factor=8
+  A2:
+    module: CAAAttention
+    args: [11]
+    description: Context Anchor Attention, strip kernel=11
+  A3:
+    module: TripletAttention
+    args: [false, 7]
+    description: Triplet Attention with spatial branch, kernel=7
+
+screening_metrics:
+  - mAP50-95
+  - AP_small
+  - Recall_small
+  - AP75
+  - Params
+  - GFLOPs
+  - batch1_P50_latency
+
+go_signal:
+  preferred:
+    map50_95_delta_pp: 0.5
+    ap_small_delta_pp: 1.0
+  alternative:
+    recall_small_delta_pp: 2.0
+    map50_95_non_negative: true
+
+prohibited_in_phase3:
+  - rerun_B0
+  - combine_attention_modules
+  - multiple_attention_insertions
+  - P2_head
+  - new_loss
+  - augmentation_change
+  - DySample
+  - PPRD
+  - threshold_search_on_test
