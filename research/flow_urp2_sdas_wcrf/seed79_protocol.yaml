@@ -1,0 +1,91 @@
+protocol_id: flow_pbm_protocol_seed79
+status: frozen
+purpose: UR-P2 / SDAS / WCRF mechanism comparison
+
+# Verified local project facts. Do not replace these with earlier incompatible
+# FloW statistics or a different split.
+data:
+  dataset: FloW-Img Roboflow v2
+  images: 2000
+  instances: 5272
+  class_count: 1
+  split:
+    train: 1400
+    val: 200
+    test: 400
+  split_seed: 79
+  split_manifest: dataset/FloW_IMG/splits/flow_pbm_protocol_seed79/manifest.json
+  split_lock: dataset/FloW_IMG/splits/flow_pbm_protocol_seed79/SPLIT_LOCK.json
+
+baseline:
+  model: stock yolo11n.yaml
+  initialization: scratch
+  pretrained: false
+  run_dir: runs/flow_baseline/yolo11n_scratch_640_pbm_seed79
+  checkpoint_selection: best Val mAP50-95
+  best_epoch_reference: 238
+  test_reference:
+    precision_percent: 90.58
+    recall_percent: 82.19
+    map50_percent: 87.20
+    map50_95_percent: 45.22
+    params_million: 2.582
+    gflops: 6.372
+
+train:
+  seed: 79
+  imgsz: 640
+  epochs: 300
+  batch: 32
+  optimizer: SGD
+  lr0: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  pretrained: false
+
+selection_and_test:
+  select_checkpoint_only_by: val/mAP50-95
+  test_access: once after a completed 300-epoch run and checkpoint selection
+  prohibit_test_driven_tuning: true
+  rerun_baseline: false
+
+inheritance_rule: >-
+  The fields above are the explicit frozen contract. Every other training,
+  augmentation, dataloader, AMP, device, scheduler, warmup, mosaic/close-mosaic,
+  cache, workers and evaluation argument MUST be copied from the saved B0 seed79
+  run/config in the user's working tree. Do not silently substitute Ultralytics
+  defaults if the saved B0 argument exists.
+
+module_defaults:
+  URP2:
+    reg_max: 16
+    hidden: 64
+    uncertainty_threshold: 0.55
+    temperature: 0.15
+    detach_router: true
+    reg_residual_scale: 0.25
+    cls_residual_scale: 1.0
+    sparse_runtime_claim: false
+    note: v1 is dense-compute soft routing; sparse acceleration is not claimed
+  SDAS:
+    lambda_sdas: 0.25
+    supervise: all_gt_centers
+    min_radius: 0
+    max_radius: 4
+    inference_head_removed: true
+    note: no size gate is allowed until a new seed79-aligned size audit justifies it
+  WCRF:
+    hidden: auto_half_channels_min16
+    context_kernel: 7
+    context_dilation: 2
+    gamma_init: 0.0
+    detect_only_p3_side_branch: true
+
+variant_order:
+  - U
+  - S
+  - W
+  - US
+  - UW
+  - SW
+  - USW
