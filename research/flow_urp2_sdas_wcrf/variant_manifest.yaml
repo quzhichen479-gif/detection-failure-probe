@@ -1,0 +1,71 @@
+anchors:
+  p2_backbone: stock P2/4 output; audited project layer 2
+  p3_fused: final fused P3/8 C3k2; audited project layer 16
+  p4_fused: final P4/16; audited project layer 19
+  p5_fused: final P5/32; audited project layer 22
+  stock_detect_sources: [16, 19, 22]
+  warning: re-audit numeric indices in the local Ultralytics 8.4.113 tree before patching
+
+local_yaml_targets:
+  U: ultralytics/cfg/models/11/yolo11n-flow-urp2.yaml
+  S: ultralytics/cfg/models/11/yolo11n-flow-sdas.yaml
+  W: ultralytics/cfg/models/11/yolo11n-flow-wcrf.yaml
+  US: ultralytics/cfg/models/11/yolo11n-flow-urp2-sdas.yaml
+  UW: ultralytics/cfg/models/11/yolo11n-flow-wcrf-urp2.yaml
+  SW: ultralytics/cfg/models/11/yolo11n-flow-sdas-wcrf.yaml
+  USW: ultralytics/cfg/models/11/yolo11n-flow-sdas-wcrf-urp2.yaml
+
+variants:
+  U:
+    modules: [URP2]
+    graph:
+      p2: URP2 detail source
+      p3: stock semantic source
+      p4_p5: stock
+      detect: URP2Detect
+  S:
+    modules: [SDAS]
+    graph:
+      p2: train-only SDAS center head
+      p3_p4_p5: stock Detect
+      export: remove SDAS
+  W:
+    modules: [WCRF]
+    graph:
+      p3_pan: untouched stock P3
+      p3_detect: WCRF(P3)
+      p4_p5: stock
+      detect: stock Detect with WCRF P3 side branch
+  US:
+    modules: [SDAS, URP2]
+    graph:
+      p2: SDAS in train; URP2 detail at inference
+      p3: stock semantic source
+      p4_p5: stock
+      detect: URP2Detect
+  UW:
+    modules: [WCRF, URP2]
+    graph:
+      p2: URP2 detail source
+      p3_pan: untouched stock P3
+      p3_detect: WCRF(P3) -> URP2 semantic source
+      p4_p5: stock
+      detect: URP2Detect
+  SW:
+    modules: [SDAS, WCRF]
+    graph:
+      p2: train-only SDAS
+      p3_pan: untouched stock P3
+      p3_detect: WCRF(P3)
+      p4_p5: stock
+      detect: stock Detect
+  USW:
+    modules: [SDAS, WCRF, URP2]
+    graph:
+      p2: SDAS in train; URP2 detail at inference
+      p3_pan: untouched stock P3
+      p3_detect: WCRF(P3) -> URP2 semantic source
+      p4_p5: stock
+      detect: URP2Detect
+
+full_train_order: [U, S, W, US, UW, SW, USW]
