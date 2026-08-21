@@ -1,0 +1,113 @@
+project: flow_pprd_phase1
+status: implementation_ready
+baseline_policy: reuse_existing_do_not_rerun
+
+protocol:
+  name: flow_pbm_protocol_seed79
+  dataset: FloW-Img_Roboflow_v2
+  split:
+    train: 1400
+    val: 200
+    test: 400
+  split_seed: 79
+  train_seed: 79
+  split_manifest: dataset/FloW_IMG/splits/flow_pbm_protocol_seed79/manifest.json
+  split_lock: dataset/FloW_IMG/splits/flow_pbm_protocol_seed79/SPLIT_LOCK.json
+
+baseline:
+  model: yolo11n
+  initialization: scratch
+  pretrained: false
+  imgsz: 640
+  epochs: 300
+  batch: 32
+  optimizer: SGD
+  lr0: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  checkpoint_rule: best_validation_map50_95
+  existing_run: runs/flow_baseline/yolo11n_scratch_640_pbm_seed79
+  existing_metrics: runs/flow_baseline/yolo11n_scratch_640_pbm_seed79/final_metrics.json
+  test_reference:
+    precision_pct: 90.58
+    recall_pct: 82.19
+    map50_pct: 87.20
+    map50_95_pct: 45.22
+    ap_small_pct: 32.61
+    recall_small_pct: 42.43
+    params_m: 2.582347
+    gflops: 6.372
+
+phase1:
+  frozen_controls:
+    - dataset_membership
+    - data_split
+    - train_seed
+    - initialization
+    - imgsz
+    - epochs
+    - batch
+    - optimizer
+    - learning_rate
+    - momentum
+    - weight_decay
+    - augmentation
+    - loss
+    - evaluator
+    - checkpoint_rule
+    - test_access_policy
+  forbidden_changes:
+    - attention
+    - p2_detection_head
+    - new_loss
+    - augmentation_tuning
+    - threshold_tuning_on_test
+    - pretrained_weights
+  experiments:
+    D1:
+      module: RepContextDown
+      insertion: backbone_P2_to_P3_only
+      purpose: cheap_context_control
+    D2:
+      module: SPDDown
+      insertion: backbone_P2_to_P3_only
+      purpose: full_polyphase_control
+    D3:
+      module: PartialPolyphaseRepDown
+      detail_ratio: 0.25
+      insertion: backbone_P2_to_P3_only
+      purpose: primary_method
+    D4:
+      module: PartialPolyphaseRepDown
+      detail_ratio_P2_to_P3: 0.25
+      detail_ratio_P3_to_P4: 0.125
+      insertion: backbone_P2_to_P3_and_P3_to_P4
+      purpose: stage_extension
+      gate: run_only_if_D3_nonnegative_and_engineering_checks_pass
+
+engineering_checks:
+  - yaml_build
+  - forward_shape
+  - params_gflops
+  - finite_loss_smoke_train
+  - validation_smoke
+  - predict_smoke
+  - export_smoke
+  - rep_deploy_equivalence_1e-5
+
+screening_metrics:
+  - map50_95
+  - ap_small
+  - recall_small
+  - ap75
+  - params
+  - gflops
+  - batch1_p50_latency
+
+screening_go:
+  map50_95_delta_pp_min: 0.5
+  and_one_of:
+    ap_small_delta_pp_min: 1.5
+    recall_small_delta_pp_min: 2.0
+  preferred_gflops_increase_pct_max: 5
+  preferred_p50_increase_pct_max: 5
