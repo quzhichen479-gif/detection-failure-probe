@@ -1,0 +1,92 @@
+project: flow_dysample_phase2
+status: implementation_ready
+base_branch: research/flow-pprd-phase1
+base_commit: c75e182459b046faf6190e3faed0d3b1b088fa6c
+
+source:
+  paper: "Learning to Upsample by Learning to Sample"
+  venue: ICCV 2023
+  official_code: https://github.com/tiny-smart/dysample
+  license: MIT
+
+frozen_protocol:
+  dataset: FloW-Img Roboflow v2
+  images: 2000
+  instances: 5272
+  split: [1400, 200, 400]
+  split_seed: 79
+  train_seed: 79
+  model: YOLO11n scratch
+  pretrained: false
+  imgsz: 640
+  epochs: 300
+  batch: 32
+  optimizer: SGD
+  lr0: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  checkpoint_rule: best validation mAP50-95
+  test_policy: evaluate the 400-image Test only after each training run is complete
+
+baseline_reference:
+  id: B0
+  test_map50_95: 0.452200
+  test_ap75: 0.395600
+  test_ap_small: 0.326085
+  test_recall_small: 0.424346
+  params: 2582347
+  gflops: 6.3720
+  batch1_p50_ms: 5.615
+
+module:
+  class: DySample
+  default_args:
+    scale: 2
+    style: lp
+    groups: 4
+    dyscope: false
+  contract:
+    channel_preserving: true
+    spatial_scale: 2
+    custom_cuda: false
+
+experiments:
+  U1:
+    change: replace only the second neck upsample, P4/16 -> P3/8, with DySample
+    purpose: primary small-object experiment
+  U2:
+    change: replace only the first neck upsample, P5/32 -> P4/16, with DySample
+    purpose: scale-location control
+  U3:
+    change: replace both neck x2 nearest-neighbor upsample layers with DySample
+    purpose: combined upsampling test
+
+constraints:
+  - do not rerun B0
+  - do not change the frozen split or training arguments
+  - do not add attention, P2 head, new loss, augmentation changes, or threshold tuning
+  - do not combine with PPRD in the first DySample screen
+  - use style=lp, groups=4, dyscope=false for U1-U3
+
+engineering_checks:
+  - model YAML parses and builds
+  - output channels are unchanged and spatial size doubles exactly
+  - forward and backward are finite
+  - short train smoke test has finite losses
+  - validation and predict run
+  - TorchScript or ONNX export runs
+  - Params, GFLOPs, and batch-1 P50 are recorded under the existing harness
+
+screening_metrics:
+  - mAP50-95
+  - AP_small
+  - Recall_small
+  - AP75
+  - Params
+  - GFLOPs
+  - batch-1 P50 latency
+
+screening_go_signal:
+  primary: "mAP50-95 >= B0 + 0.5 pp and AP_small >= B0 + 1.0 pp"
+  alternative: "Recall_small >= B0 + 2.0 pp with non-negative mAP50-95"
+  cost_guardrail: "batch-1 P50 preferably <= B0 + 10%"
