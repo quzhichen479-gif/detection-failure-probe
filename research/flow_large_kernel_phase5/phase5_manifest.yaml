@@ -1,0 +1,91 @@
+phase: 5
+name: flow_large_kernel_context
+status: design_frozen_implementation_ready
+repository: https://github.com/quzhichen479-gif/detection-failure-probe
+branch: research/flow-large-kernel-phase5
+base_branch: research/flow-cc-msca-phase4
+runtime:
+  ultralytics: 8.4.113
+  model: YOLO11n
+  pretrained: false
+  image_size: 640
+  epochs: 300
+  batch: 32
+  optimizer: SGD
+  lr0: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  split_seed: 79
+  train_seed: 79
+insertion:
+  feature_level: P3/8
+  target_path: classification_only
+  detect_tower: cv3[0]
+  regression_path_unchanged: true
+  p4_p5_unchanged: true
+variants:
+  M1:
+    id: unireplk_p3cls
+    class: UniRepLKControl
+    purpose: generic_large_receptive_field_control
+    params:
+      kernel_size: 17
+      gamma_init: 0.0
+      branch_kernels: [5, 9, 3, 3, 3]
+      branch_dilations: [1, 2, 4, 5, 7]
+    deploy_materialization: true
+  M2:
+    id: striplkc_p3cls
+    class: StripLKC
+    purpose: directional_water_context
+    params:
+      local_kernel: 3
+      strip_kernel: 17
+      gamma_init: 0.0
+    deploy_materialization: false
+  M3:
+    id: cepconv_p3cls
+    class: CEPConvLKC
+    purpose: center_excluded_peripheral_context
+    params:
+      local_kernel: 3
+      kernel_size: 17
+      center_kernel: 5
+      peripheral_sharing: logarithmic_eccentricity
+      gamma_init: 0.0
+    deploy_materialization: true
+baseline_test_reference:
+  precision_pct: 90.58
+  recall_pct: 82.19
+  map50_pct: 87.20
+  map50_95_pct: 45.22
+  ap75_pct: 39.56
+  ap_small_pct: 32.61
+  recall_small_pct: 42.43
+  params_m: 2.582
+  gflops: 6.372
+promotion:
+  any_of:
+    - val_map50_95_delta_pp >= 0.7
+    - val_ap_small_delta_pp >= 1.5
+    - val_recall_small_delta_pp >= 3.0 and val_map50_95_delta_pp >= 0.0
+prohibited:
+  - combine_phase5_variants
+  - assignment_or_loss_change
+  - p2_detection_head
+  - higher_training_resolution
+  - new_augmentation
+  - attention_or_msca_stack
+  - frequency_or_edge_branch
+  - dysample_or_downsampling_change
+  - test_driven_tuning
+sources:
+  - title: UniRepLKNet
+    venue: CVPR 2024
+    url: https://openaccess.thecvf.com/content/CVPR2024/html/Ding_UniRepLKNet_A_Universal_Perception_Large-Kernel_ConvNet_for_Audio_Video_Point_CVPR_2024_paper.html
+  - title: Strip R-CNN
+    venue: AAAI 2026
+    url: https://ojs.aaai.org/index.php/AAAI/article/view/38217
+  - title: PeLK
+    venue: CVPR 2024
+    url: https://openaccess.thecvf.com/content/CVPR2024/html/Chen_PeLK_Parameter-efficient_Large_Kernel_ConvNets_with_Peripheral_Convolution_CVPR_2024_paper.html
