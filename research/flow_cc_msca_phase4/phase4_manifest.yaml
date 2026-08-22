@@ -1,0 +1,208 @@
+project: flow_cc_msca_phase4
+status: design_frozen_implementation_ready
+branch: research/flow-cc-msca-phase4
+
+baseline:
+  id: B0
+  rerun: false
+  protocol: flow_pbm_protocol_seed79
+  dataset: FloW-Img Roboflow v2
+  images: 2000
+  instances: 5272
+  split:
+    train: 1400
+    val: 200
+    test: 400
+  split_seed: 79
+  train_seed: 79
+  model: YOLO11n
+  initialization: scratch
+  pretrained: false
+  imgsz: 640
+  epochs: 300
+  batch: 32
+  optimizer: SGD
+  lr0: 0.01
+  momentum: 0.937
+  weight_decay: 0.0005
+  checkpoint_rule: best_validation_mAP50_95
+  test_reference:
+    precision: 0.905838
+    recall: 0.821902
+    map50: 0.872033
+    map50_95: 0.452200
+    ap75: 0.395600
+    ap_small: 0.326085
+    recall_small: 0.424346
+    params_m: 2.582
+    gflops: 6.372
+    batch1_p50_ms: 5.615
+
+phase3_prior:
+  attention_family_result: negative
+  variants:
+    EMA:
+      delta_test_map50_95_pp: -0.873
+    CAA:
+      delta_test_map50_95_pp: -1.492
+    Triplet:
+      delta_test_map50_95_pp: -0.350
+  implication: >-
+    Do not repeat generic late P3 reweighting. Phase 4 tests early structured-water
+    context contrast instead.
+
+mechanism:
+  name: ContextContrastMSCA
+  local_operator:
+    type: depthwise_conv
+    kernel: 3
+    initialization: identity_delta
+  context_operator:
+    type: fixed_directional_average_pool
+    kernels: [3, 5, 7]
+    learnable_large_kernel: false
+  scale_mixture:
+    type: global_softmax_scalars
+    initialization: equal
+    image_conditioned: false
+  descriptors:
+    background: "B=sum(alpha_k*0.5*(H_k+V_k))"
+    signed_residual: "R=L-B"
+    contrast: "C=sum(alpha_k*0.5*(abs(L-H_k)+abs(L-V_k)))"
+    anisotropy: "Q=sum(alpha_k*abs(abs(L-H_k)-abs(L-V_k)))"
+  gate:
+    input: [L, C, Q]
+    reduction: 8
+    final_projection_init: zero
+  output: "Y=X+Gamma*sigmoid(gate)*R"
+  gamma:
+    type: per_channel_signed
+    initialization: 0.0
+  initialization_property: exact_identity
+
+experiments:
+  M1:
+    run_name: flow_yolo11n_m1_segnext_msca_p2_seed79
+    module: SegNeXtMSCA
+    insertion: backbone_P2_after_C3k2_before_P3_downsample
+    args:
+      local_kernel: 5
+      strip_kernels: [7, 11, 21]
+    role: conventional_msca_external_control
+  M2:
+    run_name: flow_yolo11n_m2_ccmsca_p2_seed79
+    module: ContextContrastMSCA
+    insertion: backbone_P2_after_C3k2_before_P3_downsample
+    args:
+      context_kernels: [3, 5, 7]
+      reduction: 8
+      gamma_init: 0.0
+    role: main_hypothesis
+  M3:
+    run_name: flow_yolo11n_m3_ccmsca_p3_seed79
+    module: ContextContrastMSCA
+    insertion: backbone_P3_after_C3k2_before_P4_downsample
+    args:
+      context_kernels: [3, 5, 7]
+      reduction: 8
+      gamma_init: 0.0
+    role: insertion_position_control
+
+frozen:
+  - split_manifest
+  - all_saved_B0_training_arguments
+  - optimizer_and_lr_schedule
+  - augmentation
+  - loss
+  - TAL_and_DFL
+  - evaluator
+  - confidence_and_nms_policy
+  - checkpoint_selection
+  - M1_M2_M3_module_defaults
+  - M1_M2_M3_insertion_positions
+
+execution:
+  order: [M1, M2, M3]
+  full_epochs_required: 300
+  early_stop_for_metric_screening: false
+  engineering_failure_stop_only: true
+  test_policy: >-
+    Train all M1-M3 first. Freeze code/configs after M3. Then evaluate each best.pt
+    on the 400-image Test exactly once. No candidate Test result may change later configs.
+
+engineering_gate:
+  - unit_tests
+  - model_build
+  - channel_and_shape_preservation
+  - downstream_index_validation
+  - finite_fp32_and_amp_forward_backward
+  - nonempty_and_empty_gt_smoke
+  - short_train_finite_losses
+  - val_and_predict
+  - export
+  - params_gflops_latency
+  - cc_msca_standalone_exact_identity_at_init
+
+required_metrics:
+  - precision
+  - recall
+  - mAP50
+  - mAP50_95
+  - AP75
+  - AP_small
+  - Recall_small
+  - AP_medium
+  - AP_large
+  - Params
+  - GFLOPs
+  - peak_VRAM
+  - training_wall_time
+  - batch1_P50
+  - batch1_P95_if_available
+  - best_epoch
+  - val_to_test_map50_95_delta
+
+cc_msca_diagnostics:
+  - final_softmax_scale_logits
+  - gamma_abs_mean
+  - gamma_abs_median
+  - gamma_abs_max
+  - gamma_positive_channel_fraction
+  - gamma_negative_channel_fraction
+
+discovery_positive:
+  any_of:
+    - map50_95_delta_pp_gte: 0.7
+    - ap_small_delta_pp_gte: 1.5
+    - recall_small_delta_pp_gte: 3.0
+      require_map50_95_non_negative: true
+
+interpretation:
+  precision_only_is_not_success: true
+  ap75_alone_does_not_prove_localization: true
+  M1_vs_M2_strict_one_factor_ablation: false
+  M2_vs_M3_primary_position_comparison: true
+  all_three_fail_action: stop_msca_attention_search
+
+prohibited:
+  - rerun_B0
+  - test_driven_tuning
+  - P2_detection_head
+  - dynamic_or_selective_kernel
+  - partial_channel_variant
+  - frequency_or_edge_branch
+  - loss_or_assignment_change
+  - augmentation_change
+  - DySample
+  - PPRD
+  - downsampling_change
+  - second_attention_module
+  - multi_position_CC_MSCA
+  - imgsz_change
+  - optimizer_or_schedule_change
+
+sources:
+  SegNeXt: https://proceedings.neurips.cc/paper_files/paper/2022/hash/08050f40fff41616ccfc3080e60a301a-Abstract-Conference.html
+  YOLO11_MCN: https://www.mdpi.com/2071-1050/18/10/5083
+  ESAK_YOLO: https://www.nature.com/articles/s41598-026-53167-2
+  Float_DEIM: https://www.sciencedirect.com/science/article/pii/S0025326X26003796
