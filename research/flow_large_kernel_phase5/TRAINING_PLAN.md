@@ -109,7 +109,7 @@ Positive context signal:
 ```text
 AP_small +>=1.0 pp
 OR Recall_small +>=2.0 pp
-OR structured-water FP/image ->=10% with overall mAP non-negative
+OR structured-water FP/image decreases >=10% with overall mAP non-negative
 ```
 
 If the model clearly fails these signatures, stop and record it; do not tune kernel size on Val.
